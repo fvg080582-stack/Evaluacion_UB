@@ -40,6 +40,7 @@ header{display:grid;grid-template-columns:330px 1fr 180px;align-items:center;min
 }
 @keyframes pwaSpin { to { transform:rotate(360deg); } }
 </style>
+<script src="https://unpkg.com/@zxing/browser@0.1.5/umd/index.min.js"></script>
 </head><body>
 <div id="pwa-loading" aria-label="Cargando Clínica Integrada">
   <div class="pwa-card">
@@ -67,7 +68,7 @@ header{display:grid;grid-template-columns:330px 1fr 180px;align-items:center;min
 <section id="login" class="card narrow"><h1>Acceso profesor</h1><p>Introduce tu código personal. El profesor quedará asociado a cada evaluación.</p><input id="code" autocomplete="off" placeholder="Código de profesor"><button id="loginBtn">Entrar</button><p class="hint">Prototipo: Andrés Pascual = <b>ANDRES26</b></p><div id="loginMsg" class="error"></div></section>
 <section id="app" class="hidden">
 <div class="topline"><div><small>Profesor</small><h2 id="profName"></h2></div><div class="appnav"><div class="tabs"><button data-tab="eval" class="active">Evaluar · por alumno</button><button data-tab="turns">Evaluar · por turno</button><button data-tab="day">Evaluar · por día</button><button data-tab="audit">Auditoría</button></div><div class="admin-entry"><button data-tab="admin">⚙ Administración</button></div></div></div>
-<div id="eval" class="panel"><div class="grid2"><div class="card"><h3>1 · Identificar alumno</h3><div class="row"><input id="studentSearch" placeholder="NIUB o nombre"><button id="searchBtn">Buscar</button></div><button id="scanBtn" class="secondary">📷 Escanear QR</button><video id="video" class="hidden" playsinline></video><div id="results"></div></div>
+<div id="eval" class="panel"><div class="grid2"><div class="card"><h3>1 · Identificar alumno</h3><div class="row"><input id="studentSearch" placeholder="NIUB o nombre"><button id="searchBtn">Buscar</button></div><div class="row" style="margin-top:10px;flex-wrap:wrap"><button id="scanBtn" class="secondary">📷 Escanear QR / código de barras</button><button id="stopScanBtn" class="ghost hidden" type="button">✕ Cerrar lector</button></div><video id="video" class="hidden" playsinline muted></video><div id="scanStatus" class="hint" aria-live="polite"></div><div id="results"></div></div>
 <div class="card"><h3>2 · Evaluación</h3><div id="selected" class="selected empty">Selecciona un alumno</div><label>Fecha de la práctica<input id="practiceDate" type="date"></label><label>Procedimiento<select id="treatment"></select></label><div id="normalFields"><label>Situación<select id="situation"></select></label><label>Nota (0–10)<input id="score" type="number" min="0" max="10" step="0.1" placeholder="0–10"></label></div><div id="auxFields" class="hidden"><label>Auxiliar</label><div class="yesno"><button type="button" id="auxYes">Sí</button><button type="button" id="auxNo">No</button></div></div><label>Observaciones<textarea id="notes" rows="3" placeholder="Opcional"></textarea></label><button id="saveBtn">Guardar evaluación</button><div id="saveMsg"></div><div class="historybox"><h4>Historial del estudiante</h4><div id="studentHistory"><p class="hint">Selecciona un alumno para ver todas sus notas por fecha.</p></div></div></div></div></div>
 <div id="turns" class="panel hidden"><div class="grid2"><div class="card"><h3>Alumnos por turno</h3><p class="hint">Selecciona un turno para ver todos los alumnos asignados.</p><select id="turnSelect"></select><div id="turnStudents" class="turnlist"></div></div><div class="card"><h3>Turnos del alumno</h3><div id="turnSelected" class="selected empty">Selecciona un alumno del listado</div><p class="hint">Al tocar un alumno se seleccionará para evaluarlo. Después pulsa la pestaña Evaluar.</p></div></div></div>
 <div id="day" class="panel hidden"><div class="card"><div class="spread"><div><h3>Evaluaciones por día</h3><label>Fecha<input id="dayDate" type="date"></label></div><button id="exportDay" class="secondary">Exportar CSV</button></div><div id="dayTable"></div></div></div>
@@ -1581,12 +1582,101 @@ $('#exportDay').onclick=()=>{let d=$('#dayDate').value||localToday(),a=activeEva
 $('#exportGrades').onclick=()=>downloadCSV('medias_clinica.csv',[['NIUB','Alumno','Grupo','N evaluaciones','Media'],...gradeRows().map(x=>[x.niub,x.name,x.group,x.n,x.avg.toFixed(2)])]);
 function renderTurns(){let p=$('#turnSelect').value;if(!p){$('#turnStudents').innerHTML='<p class="hint" style="padding:10px">Selecciona un turno.</p>';return}let a=DATA.students.filter(s=>(s.practices||[]).includes(p)).sort((a,b)=>a.name.localeCompare(b.name));$('#turnStudents').innerHTML=a.map(s=>`<button class="turnbtn" data-niub="${s.niub}"><b>${esc(s.name)}</b><br><small>NIUB ${s.niub} · Grupo ${esc(s.group)}</small></button>`).join('')||'<p class="hint" style="padding:10px">No hay alumnos.</p>';document.querySelectorAll('.turnbtn').forEach(b=>b.onclick=()=>{selectStudent(b.dataset.niub);$('#turnSelected').classList.remove('empty');$('#turnSelected').innerHTML=`<b>${selectedStudent.name}</b><br><small>NIUB ${selectedStudent.niub} · Grupo ${selectedStudent.group}</small>`})} $('#turnSelect').onchange=renderTurns;
 $('#addStudent').onclick=()=>{let name=$('#newName').value.trim().toUpperCase(),niub=$('#newNiub').value.trim(),group=$('#newGroup').value,practice=$('#newPractice').value;if(!name||!niub||!group||!practice){$('#adminMsg').className='error';$('#adminMsg').textContent='Completa todos los campos';return}if(DATA.students.some(s=>s.niub===niub)){ $('#adminMsg').className='error';$('#adminMsg').textContent='Ese NIUB ya existe';return}let st={name,niub,group,practices:[practice]};let c=JSON.parse(localStorage.getItem(STUDKEY)||'[]');c.push(st);localStorage.setItem(STUDKEY,JSON.stringify(c));DATA.students.push(st);fillSelects();$('#adminMsg').className='success';$('#adminMsg').textContent='✓ Alumno añadido';$('#newName').value='';$('#newNiub').value=''};
-$('#scanBtn').onclick=async()=>{if(!('BarcodeDetector'in window)){alert('Este navegador no ofrece lectura QR directa en este prototipo. Usa la búsqueda por NIUB o Safari/Chrome compatible.');return}try{scannerStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment'}});let v=$('#video');v.srcObject=scannerStream;v.classList.remove('hidden');await v.play();let det=new BarcodeDetector({formats:['qr_code']});let loop=async()=>{if(!scannerStream)return;let codes=await det.detect(v);if(codes.length){let raw=codes[0].rawValue.toLowerCase().replace('niub','').trim();let s=DATA.students.find(x=>raw.includes(x.niub));if(s){selectStudent(s.niub);scannerStream.getTracks().forEach(t=>t.stop());scannerStream=null;v.classList.add('hidden');return}}requestAnimationFrame(loop)};loop()}catch(e){alert('No se pudo acceder a la cámara: '+e.message)}};
+let scannerControls=null;
+function normalizeScanValue(value){
+  return String(value||'').trim().toLowerCase().replace(/\s+/g,'');
+}
+function findStudentFromCode(value){
+  const raw=normalizeScanValue(value);
+  if(!raw)return null;
+  // Prefer exact NIUB matches, then accept a QR/barcode containing the NIUB.
+  let s=DATA.students.find(x=>normalizeScanValue(x.niub)===raw);
+  if(s)return s;
+  s=DATA.students.find(x=>raw.includes(normalizeScanValue(x.niub)));
+  return s||null;
+}
+function stopScanner(){
+  try{if(scannerControls&&typeof scannerControls.stop==='function')scannerControls.stop()}catch(e){}
+  scannerControls=null;
+  if(scannerStream){try{scannerStream.getTracks().forEach(t=>t.stop())}catch(e){}scannerStream=null}
+  const v=$('#video');
+  if(v){v.pause();v.srcObject=null;v.classList.add('hidden')}
+  $('#stopScanBtn').classList.add('hidden');
+  $('#scanStatus').textContent='';
+}
+$('#stopScanBtn').onclick=stopScanner;
+$('#scanBtn').onclick=async()=>{
+  if(scannerControls||scannerStream){stopScanner();return}
+  const status=$('#scanStatus');
+  status.textContent='Abriendo cámara…';
+  try{
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia)throw new Error('El navegador no permite acceder a la cámara. Abre la aplicación desde HTTPS (GitHub Pages).');
+    const v=$('#video');
+    v.classList.remove('hidden');
+    $('#stopScanBtn').classList.remove('hidden');
+    status.textContent='Apunta al QR o al código de barras del alumno.';
+
+    // Prefer ZXing because it reads QR + common 1D/2D barcodes and is more
+    // consistent across iPhone Safari versions than BarcodeDetector alone.
+    if(window.ZXingBrowser && window.ZXingBrowser.BrowserMultiFormatReader){
+      const reader=new ZXingBrowser.BrowserMultiFormatReader();
+      const devices=await ZXingBrowser.BrowserCodeReader.listVideoInputDevices();
+      const back=devices.find(d=>/back|rear|environment|trasera|posterior/i.test(d.label));
+      const deviceId=back?.deviceId||devices[0]?.deviceId;
+      scannerControls=await reader.decodeFromConstraints(
+        {video:deviceId?{deviceId:{exact:deviceId},width:{ideal:1280},height:{ideal:720}}:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}},
+        v,
+        (result,error,controls)=>{
+          if(controls)scannerControls=controls;
+          if(!result)return;
+          const raw=result.getText();
+          const student=findStudentFromCode(raw);
+          if(student){
+            $('#studentSearch').value=student.niub;
+            selectStudent(student.niub);
+            status.textContent='✓ '+student.name+' · NIUB '+student.niub;
+            stopScanner();
+          }else{
+            status.textContent='Código leído, pero no coincide con ningún NIUB de la lista.';
+          }
+        }
+      );
+      return;
+    }
+
+    // Native fallback for browsers that expose BarcodeDetector.
+    if('BarcodeDetector' in window){
+      const formats=await BarcodeDetector.getSupportedFormats();
+      const wanted=['qr_code','code_128','code_39','ean_13','ean_8','upc_a','upc_e','itf','data_matrix','pdf417'].filter(f=>formats.includes(f));
+      const det=new BarcodeDetector({formats:wanted.length?wanted:formats});
+      scannerStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}});
+      v.srcObject=scannerStream;await v.play();
+      const loop=async()=>{
+        if(!scannerStream)return;
+        try{
+          const codes=await det.detect(v);
+          if(codes.length){
+            const student=findStudentFromCode(codes[0].rawValue);
+            if(student){$('#studentSearch').value=student.niub;selectStudent(student.niub);stopScanner();return}
+            status.textContent='Código leído, pero no coincide con ningún NIUB de la lista.';
+          }
+        }catch(e){}
+        requestAnimationFrame(loop);
+      };
+      loop();
+      return;
+    }
+    throw new Error('No se ha podido cargar el lector de códigos. Comprueba que tienes conexión a Internet y vuelve a intentarlo.');
+  }catch(e){
+    stopScanner();
+    status.textContent='No se pudo abrir el lector: '+e.message;
+  }
+};
 
 </script>
 <script>
 (function () {
-  const APP_VERSION = "2026.09.23.2";
+  const APP_VERSION = "2026.09.23.3";
   if ("serviceWorker" in navigator) {
     window.addEventListener("load", async function () {
       try {
